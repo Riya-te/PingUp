@@ -3,90 +3,86 @@ import User from "../models/User.js";
 
 export const inngest = new Inngest({ id: "pingup-app" });
 
-// 🔥 Sync user from Clerk
+// 🔥 CREATE USER
 const syncUserCreation = inngest.createFunction(
-  { id: "sync-user-from-clerk" },
-  { event: "clerk.user.created" },
+  {
+    id: "sync-user-from-clerk",
+    triggers: [{ event: "clerk.user.created" }],
+  },
 
   async ({ event }) => {
     const data = event.data;
 
     const email = data.email_addresses?.[0]?.email_address;
-
-    if (!email) {
-      throw new Error("No email found in Clerk event");
-    }
+    if (!email) throw new Error("No email found");
 
     let username = email.split("@")[0];
 
-    // 🔍 Check if username exists
     const existingUser = await User.findOne({ username });
-
     if (existingUser) {
-      username = username + Math.floor(Math.random() * 10000);
+      username += Math.floor(Math.random() * 10000);
     }
 
-    const userData = {
+    await User.create({
       _id: data.id,
       email,
       full_name: `${data.first_name || ""} ${data.last_name || ""}`,
       profile_picture: data.image_url,
       username,
-    };
+    });
 
-    await User.create(userData);
-
-    console.log("User synced ✅");
+    console.log("User created ✅");
   }
 );
-// 🔄 Update user from Clerk
+
+// 🔄 UPDATE USER
 const syncUserUpdate = inngest.createFunction(
-  { id: "update-user-from-clerk" },
-  { event: "clerk.user.updated" },
+  {
+    id: "update-user-from-clerk",
+    triggers: [{ event: "clerk.user.updated" }],
+  },
 
   async ({ event }) => {
     const data = event.data;
 
     const email = data.email_addresses?.[0]?.email_address;
+    if (!email) throw new Error("No email found");
 
-    if (!email) {
-      throw new Error("No email found in Clerk event");
-    }
-
-    const updatedData = {
-      email,
-      full_name: `${data.first_name || ""} ${data.last_name || ""}`,
-      profile_picture: data.image_url,
-    };
-
-    // 🔥 Update user in DB
     await User.findByIdAndUpdate(
-      data.id,          // Clerk user id = Mongo _id
-      updatedData,
-      { new: true }     // return updated doc
+      data.id,
+      {
+        email,
+        full_name: `${data.first_name || ""} ${data.last_name || ""}`,
+        profile_picture: data.image_url,
+      },
+      { new: true }
     );
 
     console.log("User updated ✅");
   }
 );
 
-// ❌ Delete user from DB when removed from Clerk
+// ❌ DELETE USER
 const syncUserDelete = inngest.createFunction(
-  { id: "delete-user-from-clerk" },
-  { event: "clerk.user.deleted" },
+  {
+    id: "delete-user-from-clerk",
+    triggers: [{ event: "clerk.user.deleted" }],
+  },
 
   async ({ event }) => {
     const userId = event.data.id;
 
-    if (!userId) {
-      throw new Error("User ID not found in event");
-    }
+    if (!userId) throw new Error("User ID missing");
 
-    // 🔥 Delete user from MongoDB
     await User.findByIdAndDelete(userId);
 
     console.log("User deleted ✅");
   }
 );
 
-export const functions = [syncUserCreation, syncUserUpdate, syncUserDelete];
+// ✅ EXPORT
+export const functions = [
+  syncUserCreation,
+  syncUserUpdate,
+  syncUserDelete,
+];
