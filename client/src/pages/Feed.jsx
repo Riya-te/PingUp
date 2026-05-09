@@ -1,8 +1,8 @@
 
-import React, { useEffect, useState } from 'react'
-import { useUser } from '@clerk/react'
-import { Heart, MessageCircle, Share2, Clock3, Sparkles, Search, Plus, ArrowRight } from 'lucide-react'
-import { dummyStoriesData, dummyPostsData, dummyRecentMessagesData } from '../assets/assets'
+import React, { useEffect, useState, useRef } from 'react'
+import { useUser, useAuth } from '@clerk/react'
+import { Heart, MessageCircle, Share2, Clock3, Sparkles, Search, Plus, ArrowRight, Trash2, X } from 'lucide-react'
+import { postAPI, storyAPI, userAPI, messageAPI } from '../services/api'
 import Loading from '../components/Loading'
 
 const formatDate = (iso) => {
@@ -14,21 +14,150 @@ const formatDate = (iso) => {
 
 const Feed = () => {
   const { user } = useUser()
+  const { getToken } = useAuth()
   const [stories, setStories] = useState([])
   const [posts, setPosts] = useState([])
+  const [currentUser, setCurrentUser] = useState(null)
   const [recentMessages, setRecentMessages] = useState([])
   const [loading, setLoading] = useState(true)
+  const [error, setError] = useState(null)
+  const [showStoryModal, setShowStoryModal] = useState(false)
+  const [storyFile, setStoryFile] = useState(null)
+  const [storyPreview, setStoryPreview] = useState(null)
+  const [storyCaption, setStoryCaption] = useState('')
+  const [storyLoading, setStoryLoading] = useState(false)
+  const storyFileRef = useRef(null)
 
   useEffect(() => {
-    setStories(dummyStoriesData)
-    setPosts(dummyPostsData)
-    setRecentMessages(dummyRecentMessagesData)
-    const timer = setTimeout(() => setLoading(false), 250)
-    return () => clearTimeout(timer)
-  }, [])
+    const fetchData = async () => {
+      try {
+        setLoading(true)
+        setError(null)
+
+        const token = await getToken()
+
+        // Fetch current user data
+        const userData = await userAPI.getCurrentUser(token)
+        setCurrentUser(userData.user)
+
+        // Fetch feed posts
+        const postsData = await postAPI.getFeedPosts(token)
+        setPosts(postsData.posts || [])
+
+        // Fetch stories
+        const storiesData = await storyAPI.getStories(token)
+        setStories(storiesData.stories || [])
+
+        // Fetch recent messages
+        try {
+          const messagesData = await messageAPI.getRecentMessages(token)
+          setRecentMessages(messagesData.data || [])
+        } catch (err) {
+          console.warn('Could not fetch messages:', err)
+          setRecentMessages([])
+        }
+
+      } catch (err) {
+        console.error('Error fetching feed data:', err)
+        setError('Failed to load feed. Please try again.')
+      } finally {
+        setLoading(false)
+      }
+    }
+
+    if (user) {
+      fetchData()
+    }
+  }, [user, getToken])
+
+  const handleLikePost = async (postId) => {
+    try {
+      const token = await getToken()
+      await postAPI.likePost(token, postId)
+      // Refresh posts after liking
+      const postsData = await postAPI.getFeedPosts(token)
+      setPosts(postsData.posts || [])
+    } catch (err) {
+      console.error('Error liking post:', err)
+    }
+  }
+
+  const handleDeletePost = async (postId) => {
+    if (!window.confirm('Are you sure you want to delete this post?')) return
+    try {
+      const token = await getToken()
+      await postAPI.deletePost(token, postId)
+      // Refresh posts after deletion
+      const postsData = await postAPI.getFeedPosts(token)
+      setPosts(postsData.posts || [])
+    } catch (err) {
+      console.error('Error deleting post:', err)
+      alert('Failed to delete post')
+    }
+  }
+
+  const handleStoryFileSelect = (e) => {
+    const file = e.target.files?.[0]
+    if (file) {
+      setStoryFile(file)
+      const reader = new FileReader()
+      reader.onload = (e) => setStoryPreview(e.target.result)
+      reader.readAsDataURL(file)
+    }
+  }
+
+  const handleCreateStory = async (e) => {
+    e.preventDefault()
+    if (!storyFile) {
+      alert('Please select a media file')
+      return
+    }
+
+    setStoryLoading(true)
+    try {
+      const token = await getToken()
+      const formData = new FormData()
+      formData.append('media', storyFile)
+      if (storyCaption.trim()) {
+        formData.append('caption', storyCaption.trim())
+      }
+
+      await storyAPI.createStory(token, formData)
+
+      // Refresh stories
+      const storiesData = await storyAPI.getStories(token)
+      setStories(storiesData.stories || [])
+
+      // Reset form
+      setShowStoryModal(false)
+      setStoryFile(null)
+      setStoryPreview(null)
+      setStoryCaption('')
+      if (storyFileRef.current) {
+        storyFileRef.current.value = ''
+      }
+    } catch (err) {
+      console.error('Error creating story:', err)
+      alert('Failed to create story')
+    } finally {
+      setStoryLoading(false)
+    }
+  }
 
   if (loading) {
     return <Loading />
+  }
+
+  if (error) {
+    return (
+      <div className="min-h-screen px-4 py-6 sm:px-6 lg:px-8">
+        <div className="mx-auto max-w-7xl">
+          <div className="rounded-3xl border border-red-800 bg-red-950/80 p-6 shadow-2xl shadow-red-950/20 backdrop-blur-xl">
+            <p className="text-center text-red-400">{error}</p>
+          </div>
+        </div>
+      </div>
+    )
   }
 
   return (
@@ -41,7 +170,7 @@ const Feed = () => {
               <h1 className="text-3xl sm:text-4xl font-black tracking-tight text-white">Stay connected with your world</h1>
               <p className="max-w-2xl text-sm leading-6 text-slate-400">Scroll through posts, stories, and trending updates from the PingUp community.</p>
             </div>
-            <button className="inline-flex items-center justify-center gap-2 rounded-full bg-cyan-500 px-5 py-3 text-sm font-semibold text-white shadow-lg shadow-cyan-500/25 transition hover:bg-cyan-400">
+            <button onClick={() => setShowStoryModal(true)} className="inline-flex items-center justify-center gap-2 rounded-full bg-cyan-500 px-5 py-3 text-sm font-semibold text-white shadow-lg shadow-cyan-500/25 transition hover:bg-cyan-400">
               <Plus size={16} /> Create story
             </button>
           </div>
@@ -70,13 +199,13 @@ const Feed = () => {
                       </div>
                     </div>
                     {story.media_type === 'image' && (
-                      <img src={story.media_url} alt="Story media" className="mt-4 h-40 w-full rounded-3xl object-cover" />
+                      <img src={story.media} alt="Story media" className="mt-4 h-40 w-full rounded-3xl object-cover" />
                     )}
                     {story.media_type === 'video' && (
-                      <video src={story.media_url} className="mt-4 h-40 w-full rounded-3xl object-cover" controls />
+                      <video src={story.media} className="mt-4 h-40 w-full rounded-3xl object-cover" controls />
                     )}
-                    {story.content && (
-                      <p className="mt-4 text-sm leading-6 text-slate-300">{story.content}</p>
+                    {story.caption && (
+                      <p className="mt-4 text-sm leading-6 text-slate-300">{story.caption}</p>
                     )}
                   </div>
                 ))}
@@ -94,22 +223,38 @@ const Feed = () => {
                           <p className="text-base font-semibold text-white">{post.user.full_name}</p>
                           <p className="text-sm text-slate-500">@{post.user.username} · {formatDate(post.createdAt)}</p>
                         </div>
-                        <div className="rounded-full bg-slate-800 px-3 py-1 text-xs font-semibold uppercase tracking-[0.3em] text-cyan-400">PingUp</div>
+                        <div className="flex items-center gap-2">
+                          <div className="rounded-full bg-slate-800 px-3 py-1 text-xs font-semibold uppercase tracking-[0.3em] text-cyan-400">PingUp</div>
+                          {post.user._id === currentUser?._id && (
+                            <button
+                              onClick={() => handleDeletePost(post._id)}
+                              className="rounded-full bg-red-500/10 p-2 text-red-400 hover:bg-red-500/20 transition"
+                              title="Delete post"
+                            >
+                              <Trash2 size={16} />
+                            </button>
+                          )}
+                        </div>
                       </div>
-                      {post.content && (
-                        <p className="mt-4 text-sm leading-7 text-slate-300 whitespace-pre-line">{post.content}</p>
+                      {post.caption && (
+                        <p className="mt-4 text-sm leading-7 text-slate-300 whitespace-pre-line">{post.caption}</p>
                       )}
-                      {post.image_urls?.length > 0 && (
-                        <img src={post.image_urls[0]} alt="Post media" className="mt-5 h-[320px] w-full rounded-[2rem] object-cover" />
+                      {post.image && (
+                        <img src={post.image} alt="Post media" className="mt-5 h-[320px] w-full rounded-[2rem] object-cover" />
                       )}
                       <div className="mt-5 flex flex-wrap items-center justify-between gap-3 border-t border-slate-800 pt-5 text-sm text-slate-400">
-                        <div className="inline-flex items-center gap-2">
-                          <Heart size={18} />
-                          <span>{post.likes_count.length} Likes</span>
-                        </div>
+                        <button
+                          onClick={() => handleLikePost(post._id)}
+                          className={`inline-flex items-center gap-2 transition-colors ${
+                            post.likes?.includes(currentUser?._id) ? 'text-red-400' : 'hover:text-red-400'
+                          }`}
+                        >
+                          <Heart size={18} fill={post.likes?.includes(currentUser?._id) ? 'currentColor' : 'none'} />
+                          <span>{post.likes?.length || 0} Likes</span>
+                        </button>
                         <div className="inline-flex items-center gap-2">
                           <MessageCircle size={18} />
-                          <span>12 Comments</span>
+                          <span>{post.comments?.length || 0} Comments</span>
                         </div>
                         <div className="inline-flex items-center gap-2">
                           <Share2 size={18} />
@@ -128,7 +273,7 @@ const Feed = () => {
               <div className="flex items-start justify-between gap-4">
                 <div>
                   <p className="text-sm uppercase tracking-[0.28em] text-slate-500">Welcome back</p>
-                  <h2 className="mt-2 text-2xl font-bold text-white">{user?.firstName || 'Friend'}</h2>
+                  <h2 className="mt-2 text-2xl font-bold text-white">{currentUser?.full_name || user?.firstName || 'Friend'}</h2>
                 </div>
                 <div className="rounded-3xl bg-slate-900 p-3 text-cyan-400">
                   <Sparkles size={20} />
@@ -140,7 +285,7 @@ const Feed = () => {
                   <div className="flex items-center justify-between gap-3">
                     <div>
                       <p className="text-xs uppercase tracking-[0.3em] text-slate-500">Followers</p>
-                      <p className="mt-2 text-2xl font-bold">2.3k</p>
+                      <p className="mt-2 text-2xl font-bold">{currentUser?.followers?.length || 0}</p>
                     </div>
                     <span className="rounded-full bg-cyan-500/15 px-3 py-1 text-xs font-semibold text-cyan-300">+5.4%</span>
                   </div>
@@ -202,6 +347,78 @@ const Feed = () => {
             </div>
           </aside>
         </div>
+
+        {/* Story Creation Modal */}
+        {showStoryModal && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm">
+            <div className="w-full max-w-md rounded-3xl border border-slate-800 bg-slate-950 p-6 shadow-2xl">
+              <div className="mb-4 flex items-center justify-between">
+                <h2 className="text-xl font-bold text-white">Create Story</h2>
+                <button
+                  onClick={() => setShowStoryModal(false)}
+                  className="rounded-full p-1 hover:bg-slate-800"
+                >
+                  <X size={20} className="text-slate-400" />
+                </button>
+              </div>
+
+              <form onSubmit={handleCreateStory} className="space-y-4">
+                {storyPreview && (
+                  <div className="relative">
+                    {storyFile?.type.startsWith('image') ? (
+                      <img src={storyPreview} alt="Preview" className="h-60 w-full rounded-2xl object-cover" />
+                    ) : (
+                      <video src={storyPreview} className="h-60 w-full rounded-2xl object-cover" />
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setStoryFile(null)
+                        setStoryPreview(null)
+                        if (storyFileRef.current) storyFileRef.current.value = ''
+                      }}
+                      className="absolute right-2 top-2 rounded-full bg-red-500 p-2 text-white"
+                    >
+                      <X size={16} />
+                    </button>
+                  </div>
+                )}
+
+                <div>
+                  <label className="flex cursor-pointer items-center justify-center rounded-2xl border-2 border-dashed border-slate-700 py-8 hover:border-cyan-400">
+                    <input
+                      ref={storyFileRef}
+                      type="file"
+                      accept="image/*,video/*"
+                      onChange={handleStoryFileSelect}
+                      className="hidden"
+                    />
+                    <div className="text-center">
+                      <Plus size={24} className="mx-auto mb-2 text-slate-400" />
+                      <p className="text-sm text-slate-400">Upload image or video</p>
+                    </div>
+                  </label>
+                </div>
+
+                <textarea
+                  value={storyCaption}
+                  onChange={(e) => setStoryCaption(e.target.value)}
+                  placeholder="Add a caption (optional)"
+                  className="w-full rounded-2xl border border-slate-700 bg-slate-900/50 px-4 py-2 text-sm text-white placeholder-slate-500 focus:border-cyan-400 focus:outline-none resize-none"
+                  rows={2}
+                />
+
+                <button
+                  type="submit"
+                  disabled={!storyFile || storyLoading}
+                  className="w-full rounded-2xl bg-cyan-500 py-2 font-semibold text-white disabled:opacity-50"
+                >
+                  {storyLoading ? 'Creating...' : 'Create Story'}
+                </button>
+              </form>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   )

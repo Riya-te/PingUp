@@ -1,5 +1,7 @@
 import { Inngest } from "inngest";
 import User from "../models/User.js";
+import Connection from "../models/Connection.js";
+import transporter from "../configs/nodeMailer.js";
 
 export const inngest = new Inngest({ id: "pingup-app" });
 
@@ -80,9 +82,57 @@ const syncUserDelete = inngest.createFunction(
   }
 );
 
+//Inngest Function to Send Remainder When  a new connection request is added
+
+// 🔔 Send Email Reminder For New Connection Request
+const connectionRequestReminder = inngest.createFunction(
+  {
+    id: "connection-request-reminder",
+    triggers: [{ event: "app/connection.requested" }],
+  },
+
+  async ({ event }) => {
+
+    const { receiverId, senderName } = event.data;
+
+    // ✅ Find receiver
+    const receiver = await User.findById(receiverId);
+
+    if (!receiver) {
+      throw new Error("Receiver not found");
+    }
+
+    // ✅ Send Email
+    await transporter.sendMail({
+
+      from: `"PingUp 🚀" <${process.env.EMAIL_USER}>`,
+
+      to: receiver.email,
+
+      subject: "New Connection Request",
+
+      html: `
+        <h2>Hello ${receiver.full_name}</h2>
+
+        <p>
+          You received a new connection request
+          from <b>${senderName}</b>.
+        </p>
+
+        <p>Open PingUp to respond 🚀</p>
+      `,
+
+    });
+
+    console.log("Connection reminder email sent ✅");
+  }
+);
+
 // ✅ EXPORT
 export const functions = [
   syncUserCreation,
   syncUserUpdate,
   syncUserDelete,
+  connectionRequestReminder,
+  
 ];
