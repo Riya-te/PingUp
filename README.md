@@ -1,7 +1,7 @@
 # 🚀 PingUp — Modern Social Media Platform
 
 PingUp is a full-stack social media web application built using the MERN stack with modern scalable architecture.  
-Users can create posts, upload stories, send messages, connect with others, and interact in real time.
+Users can create posts, upload stories, send messages, connect with others, and interact in real time...
 
 ---
 
